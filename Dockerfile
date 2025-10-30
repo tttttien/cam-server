@@ -11,14 +11,14 @@ COPY model/segment.py ./model/segment.py
 
 # Install necessary system libraries
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port for Render
+# Expose the port for Railway
 EXPOSE 8888
 
 # Run the application using uvicorn
