@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, Request  # THAY UploadFile, File → Request
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import cv2
@@ -16,7 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔥 Load model khi server khởi động
 @app.on_event("startup")
 def startup_event():
     load_model()
@@ -28,30 +27,32 @@ latest_frame = None
 def read_root():
     return {"message": "Welcome to Fire Predictor API"}
 
-
 @app.post("/toggle_detection")
 def toggle_detection(enable: bool):
     global detection_enabled
     detection_enabled = enable
     return {"detection_enabled": detection_enabled}
 
+# Dùng request.body() 
 @app.post("/upload_frame")
-async def upload_frame(file: UploadFile = File(...)):
+async def upload_frame(request: Request):
     global latest_frame, detection_enabled
-    contents = await file.read()
+
+    contents = await request.body()  # Nhận raw JPEG
+
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return {"status": "error", "msg": "Invalid image"}
 
-    if detection_enabled:
-        result = segment_image(img)
-    else:
-        result = img
+    result = segment_image(img) if detection_enabled else img
 
     _, jpeg = cv2.imencode('.jpg', result)
     latest_frame = jpeg.tobytes()
 
-    return {"status": "ok"}
+    return {"status": "ok", "size": len(contents)}
 
+# Streaming 
 async def generate_video():
     global latest_frame
     while True:
