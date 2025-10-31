@@ -5,3 +5,4 @@ numpy
 tensorflow
 requests
 python-multipart
+starlette
