@@ -8,3 +8,4 @@ python-multipart
 supabase
 asyncpg
 python-dotenv
+boto3
