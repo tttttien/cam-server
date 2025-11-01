@@ -7,3 +7,4 @@ requests
 python-multipart
 supabase
 asyncpg
+python-dotenv
