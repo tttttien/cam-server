@@ -6,3 +6,4 @@ tensorflow
 requests
 python-multipart
 supabase
+asyncpg
