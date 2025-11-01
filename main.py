@@ -15,6 +15,10 @@ import json
 import cv2
 import numpy as np
 import asyncpg
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # boto3 is optional in dev environment
 try:
@@ -26,10 +30,10 @@ except Exception:
     ClientError = Exception
 
 # --- Configuration / Constants ---------------------------------------------
-S3_ENDPOINT_URL = "https://bwmqzqgnouisgshuprhh.storage.supabase.co/storage/v1/s3"
-AWS_ACCESS_KEY_ID = "0ce4e6b6d05b9bf274d7a554d1cee534"
-AWS_SECRET_ACCESS_KEY = "c596dda78c2c7dfdd351680b19b30b72fa8965700999460686abc7d7e66894d2"
-S3_BUCKET_NAME = "fire"
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
