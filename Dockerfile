@@ -3,23 +3,28 @@ FROM python:3.10-slim
 # Set working directory
 WORKDIR /app
 
-# Copy source files
-COPY distilled_student_model_weights.weights.h5 .
-COPY main.py .
-COPY requirements.txt .
-COPY model/segment.py ./model/segment.py
-
-# Install necessary system libraries
+# Install necessary system libraries for OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy requirements first for better caching
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port for Railway
-EXPOSE 8888
+# Copy the rest of the application
+COPY . .
 
-# Run the application using uvicorn
+# Set environment variables
+ENV PORT=8000
+ENV RECORDER_TEMP_DIR=/app/recorder_temp
+
+# Create temp directory for recorder
+RUN mkdir -p /app/recorder_temp
+
+# Expose the server port
+EXPOSE $PORT
+
+# Run the application
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]

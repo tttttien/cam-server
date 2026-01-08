@@ -1,0 +1,9 @@
+{
+    "camera_id": 26,
+    "api_url": "http://0.0.0.0:8000",
+    "video_source": 0,
+    "capture_fps": 30,
+    "detection_fps": 10,
+    "resize_scale": 0.3,
+    "jpeg_quality": 50
+}

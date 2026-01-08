@@ -1,8 +1,14 @@
 fastapi
-uvicorn
+uvicorn[standard]
 opencv-python
 numpy
 tensorflow
 requests
 python-multipart
-starlette
+supabase
+asyncpg
+boto3
+websockets
+websocket-client
+python-dotenv
+firebase-admin

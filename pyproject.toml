@@ -1,0 +1,10 @@
+[project]
+name = "camera-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10.12"
+dependencies = [
+    "firebase-admin>=7.1.0",
+    "labelme>=5.10.1",
+]
