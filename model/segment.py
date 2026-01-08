@@ -164,45 +164,124 @@ def load_model():
         print("✅ Model loaded successfully from", MODEL_WEIGHTS_PATH)
     except Exception as e:
         print(f"❌ Failed to load weights from {MODEL_WEIGHTS_PATH}: {e}")
+
+def apply_darkening(image, factor=0.5):
+    """
+    Darks the image to help AI focus on bright fire regions.
+    """
+    return cv2.convertScaleAbs(image, alpha=factor, beta=0)
+def get_fire_color_mask(image_bgr):
+    """
+    Broadly identifies potential fire regions based on color and brightness.
+    """
+    # 1. HSV: Hue range for fire (Red-Orange-Yellow) [0-45]
+    # Lowered Value threshold (80 instead of 120) to compensate for darkening
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    mask_hsv = cv2.inRange(hsv, np.array([0, 40, 80]), np.array([50, 255, 255]))
+    
+    # 2. YCbCr: Lowered Y (50 instead of 70) and Cr (110 instead of 120)
+    ycbcr = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2YCrCb)
+    y, cb, cr = cv2.split(ycbcr)
+    mask_ycbcr = (y > 50) & (cr > cb) & (cr > 110)
+    
+    # 3. Brightness: Lowered hot core threshold
+    mask_bright = (y > 180) & (cr > 100)
+    
+    # Combine (OR) for initial candidate search
+    return ((mask_hsv > 0) | (mask_ycbcr > 0) | mask_bright).astype(np.uint8) * 255
+
 def segment_image(image, min_fire_ratio=MIN_FIRE_RATIO):
     global model
     if model is None:
         return image, False
 
     h, w = image.shape[:2]
-    resized = cv2.resize(image, (MODEL_INPUT_SHAPE[1], MODEL_INPUT_SHAPE[0]))
-    inp = resized.astype(np.float32) / 255.0
-    pred = model.predict(inp[None], verbose=0)[0, ..., 0]
-
-    # ===== 1. Split confidence =====
-    strong = pred > 0.7
-    weak   = (pred > FIRE_THRESHOLD) & (pred <= 0.6)
-
-    mask = np.zeros_like(pred, dtype=np.uint8)
-    mask[strong] = 1
-    mask[weak] = 1
-
-    # ===== 2. Rule-based only on weak region =====
-    if np.any(weak):
-        ys, xs = np.where(weak)
-        y1, y2 = ys.min(), ys.max()
-        x1, x2 = xs.min(), xs.max()
-
-        crop = resized[y1:y2, x1:x2]
-        if crop.size > 0:
-            rule = segment(crop)
-            rule = fill_holes(rule) > 0
-
-            weak_crop = weak[y1:y2, x1:x2]
-            mask[y1:y2, x1:x2][weak_crop] &= rule[weak_crop]
-
-    # ===== 3. Final mask =====
-    fire_ratio = np.sum(mask) / mask.size
-    if fire_ratio < min_fire_ratio:
+    
+    # 0. Darken image slightly for processing (0.8 = lighter than before)
+    image_proc = apply_darkening(image, factor=0.8)
+    
+    # 1. Candidate ROI Search (Focus)
+    search_res = (MODEL_INPUT_SHAPE[1], MODEL_INPUT_SHAPE[0])
+    small_search = cv2.resize(image_proc, search_res)
+    color_mask = get_fire_color_mask(small_search)
+    
+    # Small morphological step to merge tight clusters but not global noise
+    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8))
+    
+    contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return image, False
 
-    mask_full = cv2.resize(mask * 255, (w, h), interpolation=cv2.INTER_NEAREST)
-    result = image.copy()
-    result[mask_full > 0] = [0, 0, 255]
+    # Filter by minimum area on the search resolution
+    # Significant blobs only
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 15]
+    if not valid_contours:
+        return image, False
+        
+    # Process only top 3 regions to stay fast and targeted
+    valid_contours = sorted(valid_contours, key=cv2.contourArea, reverse=True)[:3]
 
+    final_mask = np.zeros((h, w), dtype=np.uint8)
+    roi_data = []
+    batch_inputs = []
+    
+    factor_x = w / search_res[0]
+    factor_y = h / search_res[1]
+
+    for cnt in valid_contours:
+        sx, sy, sw, sh = cv2.boundingRect(cnt)
+        x, y = int(sx * factor_x), int(sy * factor_y)
+        bw, bh = int(sw * factor_x), int(sh * factor_y)
+        
+        # Focused ROI with tight padding
+        padding = int(max(bw, bh) * 0.3)
+        x1, y1 = max(0, x - padding), max(0, y - padding)
+        x2, y2 = min(w, x + bw + padding), min(h, y + bh + padding)
+        
+        crop = image_proc[y1:y2, x1:x2]
+        if crop.size < 100: continue
+        
+        img_input = cv2.resize(crop, (MODEL_INPUT_SHAPE[1], MODEL_INPUT_SHAPE[0]))
+        batch_inputs.append(img_input.astype(np.float32) / 255.0)
+        roi_data.append((x1, y1, x2, y2))
+
+    if not batch_inputs:
+        return image, False
+        
+    # 2. Batched Predict
+    preds = model.predict(np.array(batch_inputs), verbose=0)
+    
+    # 3. Post-Process and Mapping
+    for i, pred_v in enumerate(preds):
+        x1, y1, x2, y2 = roi_data[i]
+        pred_mask = pred_v[..., 0]
+        
+    # 3. Post-Process and Mapping
+    for i, pred_v in enumerate(preds):
+        x1, y1, x2, y2 = roi_data[i]
+        pred_mask = pred_v[..., 0]
+        
+        # Color Gating within ROI (Refined)
+        crop_for_color = cv2.resize(image_proc[y1:y2, x1:x2], (MODEL_INPUT_SHAPE[1], MODEL_INPUT_SHAPE[0]))
+        color_gate = get_fire_color_mask(crop_for_color)
+        
+        # Intersection of AI model and Color Evidence
+        mask_roi = (pred_mask > FIRE_THRESHOLD) & (color_gate > 0)
+        mask_roi = mask_roi.astype(np.uint8)
+        
+        # Morphology: Median blur to remove salt noise
+        mask_roi = cv2.medianBlur(mask_roi, 3)
+        
+        if np.any(mask_roi):
+            # Map back to global coordinates
+            mask_orig = cv2.resize(mask_roi, (x2-x1, y2-y1), interpolation=cv2.INTER_NEAREST)
+            final_mask[y1:y2, x1:x2] = np.maximum(final_mask[y1:y2, x1:x2], mask_orig)
+
+    # 4. Final Verification
+    fire_pixels = np.sum(final_mask > 0)
+    if (fire_pixels / final_mask.size) < min_fire_ratio:
+        return image, False
+
+    result = image.copy()
+    result[final_mask > 0] = [0, 0, 255]
     return result, True
